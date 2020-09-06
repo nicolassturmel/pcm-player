@@ -9,24 +9,32 @@
     <h2>It should play audio if everying went well!</h2>
     <p>However, the AudioContext may not allow starting the playing without a user gesture. Click this text to instruct the disobedient browser you really want to listen to the audio!</p>
 </div>
+<div id=button>play me</div>
 <script>
  window.onload = function() {
-   var socketURL = 'ws://localhost:8080';
+   var socketURL = 'ws://192.168.1.162:8080';
    var player = new PCMPlayer({
-        encoding: '16bitInt',
+        encoding: '32bitInt',
         channels: 2,
-        sampleRate: 8000,
-        flushingTime: 2000
+        sampleRate: 48000,
+        flushingTime: 200
    });
+   let go = false
+
+   document.getElementById("button").onclick = () => {
+       go = !go
+       console.log(go)
+   }
 
    var ws = new WebSocket(socketURL);
        ws.binaryType = 'arraybuffer';
        ws.addEventListener('message',function(event) {
             var data = new Uint8Array(event.data);
-            player.feed(data);
+            if(go)
+               player.feed(data);
        });
  }   
 </script>
-<script type="text/javascript" src="../pcm-player.min.js"></script>
+<script type="text/javascript" src="../pcm-player.js"></script>
 </body>
 </html>
