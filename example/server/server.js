@@ -5,21 +5,19 @@ var stats = require('./statistics')
 
 var inter_packet_stats = new stats()
 var delay_stats = new stats()
-var rms = new stats()
+var rms = [new stats(), new stats()]
 
 let interval = 0.05,
     sampleRate = 48000,
     bytePerSample = 4,
+    bytePerSampleStream = 3,
     channels = 2,
-    bytesChunk = (sampleRate * 0.05 * bytePerSample * channels),
-    offset = 0,
-    pcmData,
     wss,
     wss2;
 
   let buffer = [
-    new Buffer.alloc(0.05*sampleRate* bytePerSample * channels),
-    new Buffer.alloc(0.05*sampleRate* bytePerSample * channels)
+    new Buffer.alloc(interval*sampleRate* bytePerSample * channels),
+    new Buffer.alloc(interval*sampleRate* bytePerSample * channels)
   ]
 
   console.log(buffer)
@@ -74,7 +72,7 @@ function getPTP() {
 }
 
 function getRtp() {
-  let madd = "239.2.1.134"
+  let madd = "239.1.1.135"
   let port = 5008
   let host = "192.168.1.162"
   var client = dgram.createSocket({ type: "udp4", reuseAddr: true });
@@ -114,41 +112,46 @@ function getRtp() {
       inter_packet_stats.add(diff)
       delay_stats.add(tsdiff)
 
-      if(currentPos == 0.05*sampleRate)
-      {
-        currentPos = 0
-        currentBuffer = (currentBuffer+1)%2
-        sendData({
-          delay: delay_stats.get(),
-          inter_packets: inter_packet_stats.get(),
-          rms: 10*Math.log(rms.get().mean),
-          rtp : {
-            payload_type: pt,
-            ssrc: ssrc
-          },
-          sender : {
-            ip: remote.address,
-            port: remote.port
-          }
-        })
-      }
-
 
       if(seq != lastSeq+1)
         console.log("Err Seq: ",seq,lastSeq)
       lastSeq = seq
       if(lastSeq == 65535) lastSeq = -1
+      
 
-      for(let i = 0; i < 48; i++) 
+      for(let i = 0; i < (message.length - 12)/(channels * bytePerSampleStream); i++) 
       {
+        if(currentPos == interval*sampleRate)
+        {
+          currentPos = 0
+          sendData({
+            delay: delay_stats.get(),
+            inter_packets: inter_packet_stats.get(),
+            rms: [10*Math.log10(rms[0].get(true).mean),10*Math.log10(rms[1].get(true).mean)],
+            peak: [10*Math.log10(rms[0].get().max_global),10*Math.log10(rms[1].get().max_global)],
+            rtp : {
+              payload_type: pt,
+              ssrc: ssrc
+            },
+            sender : {
+              ip: remote.address,
+              port: remote.port
+            }
+          })
+          currentBuffer = (currentBuffer+1)%2
+        }
+
         //console.log(i)
-        let s = Math.pow(2,28)*Math.sin(2*Math.PI*800*tic/sampleRate)
+        let s = Math.pow(2,31)*0.999*Math.sin(2*Math.PI*403*tic/sampleRate)
         let s1 = (message.readInt32BE(i*6+12 - 1) & 0x00FFFFFF) << 8
         let s2 = (message.readInt32BE(i*6+12 + 3 - 1) & 0x00FFFFFF) << 8
-        rms.add((s1 / Math.pow(2,32))*(s1 / Math.pow(2,32)))
+        rms[0].add((s1 / Math.pow(2,31))*(s1 / Math.pow(2,31)))
+        rms[1].add((s2 / Math.pow(2,31))*(s2 / Math.pow(2,31)))
+        //if(i == 0) console.log(s1)
         buffer[currentBuffer].writeInt32LE(s1,bytePerSample * channels*currentPos)
         buffer[currentBuffer].writeInt32LE(s2,bytePerSample * channels*currentPos + bytePerSample)
         currentPos += 1
+        //if(currentPos == 1) buffer[currentBuffer].writeInt32LE(Math.pow(2,31)-1,0)
         tic++
       }
   });
@@ -176,6 +179,7 @@ function openSocket() {
           if(msg.type == "clear") {
             inter_packet_stats.clear()
             delay_stats.clear()
+            rms.forEach(e => e.clear())
           }
         })
   });
@@ -183,8 +187,8 @@ function openSocket() {
 
 function sendData(struct) {
     let payload;
-    console.log(struct)
-    payload = buffer[currentPos]
+    //console.log(struct)
+    payload = buffer[currentBuffer]
     wss.clients.forEach(function each(client) {
       if (client.readyState === WebSocket.OPEN) {
           client.send(payload);

@@ -14,20 +14,22 @@ module.exports = class statistics {
         if(c < this.min) this.min = c
         if(c > this.max) this.max = c
     }
-     get() {
+     get(keep) {
         if(this.min < this.global_min) this.global_min = this.min
         if(this.max > this.global_max) this.global_max = this.max
         let r = {
-            mean: this.acc/this.count,
+            mean: this.count > 0? this.acc/this.count : 0,
             min: this.min,
             max: this.max,
             min_global: this.global_min,
             max_global: this.global_max
         }
-        this.max = 0
-        this.min = Number.POSITIVE_INFINITY
-        this.acc = 0
-        this.count = 0
+        if(!keep) {
+            this.max = 0
+            this.min = Number.POSITIVE_INFINITY
+            this.acc = 0
+            this.count = 0
+        }
         return r
     }
      clear() {

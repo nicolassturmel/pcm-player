@@ -1,0 +1,46 @@
+#vumeter {
+    position: relative;
+    min-height: 400px;
+}
+
+.bar {
+    position: absolute;
+    bottom: 20%;
+    height: 75%;
+    width: 20px;
+}
+
+.left {
+    left: calc(50% - 30px );
+    background: grey;
+}
+.right {
+    right: calc(50% - 30px );
+    background: grey;
+}
+.audio {
+    transition: height 100ms ease-in-out;
+    background-color: #aa00aa;
+}
+.max {
+    transition: height 100ms ease-in-out;
+    background-color: red;
+    height: 2px;
+}
+
+.graduation {
+
+    left: calc(50% - 10px );
+    background: white;
+}
+
+.gradElem {
+    position: absolute;
+    text-align: center;
+    width: 100%;
+    font-size: small;
+}
+
+.white {
+    background-color: #EEEEEE;
+}
