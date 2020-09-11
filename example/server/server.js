@@ -2,7 +2,32 @@ const WebSocket = require('ws');
 const fs = require('fs');
 var dgram = require('dgram'); 
 var stats = require('./statistics')
+const { Worker } = require('worker_threads')
 
+const worker = new Worker("./rtp-worker.js")
+worker.on('online', () => { 
+  worker.postMessage({
+    type: "start",
+    data: {
+      maddress: "239.1.1.135",
+      host: "192.168.1.162",
+      port: 5008,
+      codec: "L24",
+      channels: 2,
+      buuferLength: 0.05,
+    }
+  })
+  console.log('Launching intensive CPU task') 
+})
+worker.on('message',(k) => {
+  switch(k.type) {
+    case "data":
+      sendData(k.data)
+      break
+    default:
+      break
+  }
+})
 var inter_packet_stats = new stats()
 var delay_stats = new stats()
 var rms = [new stats(), new stats()]
@@ -19,8 +44,6 @@ let interval = 0.05,
     new Buffer.alloc(interval*sampleRate* bytePerSample * channels),
     new Buffer.alloc(interval*sampleRate* bytePerSample * channels)
   ]
-
-  console.log(buffer)
 
   let currentBuffer = 0
   let currentPos = 0
@@ -64,6 +87,7 @@ function getPTP() {
       let s = BigInt(ts1*Math.pow(2,48) + ts2*Math.pow(2,32) + ts3*Math.pow(2,24) + ts4*Math.pow(2,16) + ts5*Math.pow(2,8) + ts6)*1000000000n + BigInt(ns1*Math.pow(2,24) + ns2*Math.pow(2,16) + ns3*Math.pow(2,8) + ns4)
       console.log(" - " + s)
       timeOffset =  s - time
+      worker.postMessage({type: "timeOffset", data: timeOffset})
     }
   })
 
@@ -71,93 +95,6 @@ function getPTP() {
   client.bind(port);
 }
 
-function getRtp() {
-  let madd = "239.1.1.135"
-  let port = 5008
-  let host = "192.168.1.162"
-  var client = dgram.createSocket({ type: "udp4", reuseAddr: true });
-
-  client.on('listening', function () {
-      console.log('UDP Client listening on ' + madd + ":" + port);
-      client.setBroadcast(true)
-      client.setMulticastTTL(128); 
-      client.addMembership(madd,host);
-  });
-
-  let lastSeq = 0
-  let lastTime = BigInt(0)
-  let tc = 0
-  let Tdiff = 0
-  let max = 0
-  let min = Number.POSITIVE_INFINITY
-
-  client.on('message', function (message, remote) {   
-      //console.log(".")
-      let v = message.readInt8(0)
-      let pt = message.readInt8(1)
-      let seq = message.readUInt16BE(2)
-      let ts = message.readUInt32BE(4)
-      let ssrc = message.readUInt32BE(8)
-
-      // inter packet time
-      let time = process.hrtime.bigint()
-      let diff = Number(time - lastTime)/1000000;
-      lastTime = time
-
-      // computing ts
-      let realTime = timeOffset + time
-      let realTS = Number(realTime*48000n / 1000000000n)%Math.pow(2,32)
-      let tsdiff = (realTS - ts + Math.pow(2,32))%Math.pow(2,32)
-      if(tsdiff > Math.pow(2,31)) tsdiff = tsdiff - Math.pow(2,32)
-      inter_packet_stats.add(diff)
-      delay_stats.add(tsdiff)
-
-
-      if(seq != lastSeq+1)
-        console.log("Err Seq: ",seq,lastSeq)
-      lastSeq = seq
-      if(lastSeq == 65535) lastSeq = -1
-      
-
-      for(let i = 0; i < (message.length - 12)/(channels * bytePerSampleStream); i++) 
-      {
-        if(currentPos == interval*sampleRate)
-        {
-          currentPos = 0
-          sendData({
-            delay: delay_stats.get(),
-            inter_packets: inter_packet_stats.get(),
-            rms: [10*Math.log10(rms[0].get(true).mean),10*Math.log10(rms[1].get(true).mean)],
-            peak: [10*Math.log10(rms[0].get().max_global),10*Math.log10(rms[1].get().max_global)],
-            rtp : {
-              payload_type: pt,
-              ssrc: ssrc
-            },
-            sender : {
-              ip: remote.address,
-              port: remote.port
-            }
-          })
-          currentBuffer = (currentBuffer+1)%2
-        }
-
-        //console.log(i)
-        let s = Math.pow(2,31)*0.999*Math.sin(2*Math.PI*403*tic/sampleRate)
-        let s1 = (message.readInt32BE(i*6+12 - 1) & 0x00FFFFFF) << 8
-        let s2 = (message.readInt32BE(i*6+12 + 3 - 1) & 0x00FFFFFF) << 8
-        rms[0].add((s1 / Math.pow(2,31))*(s1 / Math.pow(2,31)))
-        rms[1].add((s2 / Math.pow(2,31))*(s2 / Math.pow(2,31)))
-        //if(i == 0) console.log(s1)
-        buffer[currentBuffer].writeInt32LE(s1,bytePerSample * channels*currentPos)
-        buffer[currentBuffer].writeInt32LE(s2,bytePerSample * channels*currentPos + bytePerSample)
-        currentPos += 1
-        //if(currentPos == 1) buffer[currentBuffer].writeInt32LE(Math.pow(2,31)-1,0)
-        tic++
-      }
-  });
-
-  client.bind(port);
-}
 
 
 function openSocket() {
@@ -176,10 +113,8 @@ function openSocket() {
         ws.on('message',(m) => {
           let msg = JSON.parse(m)
           console.log(m,msg)
-          if(msg.type == "clear") {
-            inter_packet_stats.clear()
-            delay_stats.clear()
-            rms.forEach(e => e.clear())
+          if(msg.type == "clear") { 
+            worker.postMessage({type: "clear"})
           }
         })
   });
@@ -191,9 +126,10 @@ function sendData(struct) {
     payload = buffer[currentBuffer]
     wss.clients.forEach(function each(client) {
       if (client.readyState === WebSocket.OPEN) {
-          client.send(payload);
+          client.send(struct.buffer);
       }
     });
+    struct.buffer = null
     wss2.clients.forEach(function each(client) {
       if (client.readyState === WebSocket.OPEN) {
           client.send(JSON.stringify(struct));
@@ -201,5 +137,4 @@ function sendData(struct) {
     });
 }
 
-getRtp()
 getPTP()
