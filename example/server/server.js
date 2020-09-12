@@ -21,6 +21,7 @@ var launchRtpReceiver = (sdp,host,id) =>
         codec: "L24",
         channels: 2,
         buuferLength: 0.05,
+        offset: (sdp.media && sdp.media.length>0 && sdp.media[0].mediaClk && sdp.media[0].mediaClk.mediaClockName == "direct")? sdp.media[0].mediaClk.mediaClockValue : 0
       }
     })
     console.log('One more worker') 
@@ -73,7 +74,7 @@ function getPTP() {
       let ns3 = message.readUInt8(42)
       let ns4 = message.readUInt8(43)
       let s = BigInt(ts1*Math.pow(2,48) + ts2*Math.pow(2,32) + ts3*Math.pow(2,24) + ts4*Math.pow(2,16) + ts5*Math.pow(2,8) + ts6)*1000000000n + BigInt(ns1*Math.pow(2,24) + ns2*Math.pow(2,16) + ns3*Math.pow(2,8) + ns4)
-      console.log(" - " + s)
+      //console.log(" - " + s)
       timeOffset =  s - time
       Object.keys(RtpReceivers).forEach(k => RtpReceivers[k].postMessage({type: "timeOffset", data: timeOffset}))
       
@@ -118,6 +119,7 @@ function getSAP() {
         timer: timer,
         name: sdp.name
       })
+      if(sdp.name.includes("EX")) console.log(sdp,sdp.media[0].mediaClk)
       sendSDP(sdp,"update")
     }
     else {
@@ -150,6 +152,7 @@ function openSocket() {
   console.log('Server ready...');
   wss.on('connection', function connection(ws) {
         console.log('Socket connected. sending data...');
+        ws.on("error",() => console.log("You got halted due to an error"))
         // interval = setInterval(function() {
         //   sendData();
         // }, 50);
@@ -174,6 +177,7 @@ function openSocket() {
                 codec: "L24",
                 channels: 2,
                 buuferLength: 0.05,
+                offset: (sdpElem.sdp.media && sdpElem.sdp.media.length>0 && sdpElem.sdp.media[0].mediaClk && sdpElem.sdp.media[0].mediaClk.mediaClockName == "direct")? sdpElem.sdp.media[0].mediaClk.mediaClockValue : 0        
               }
               RtpReceivers["thgssdfw"].postMessage({
                 type: "restart",

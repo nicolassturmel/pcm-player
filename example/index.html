@@ -33,9 +33,10 @@
 
         </div>
     </div>
+    <div id=button>Play audio</div> 
 </div>
-<div id=button>play me</div>
-<div id=data></div>
+<div id=datasee>show / hide debug data</div>
+<div id=data class=hidden></div>
 <script>
 
 var bufferstats = [{},{},{},{},{},{}]
@@ -45,7 +46,9 @@ var packet_size = 48
 var setHeight = (a , b) => {
     let l = document.getElementById(b).getBoundingClientRect().height
     let lvl = 0
-    if(a > 0)
+    if(a === null) 
+        lvl = 0
+    else if(a > 0)
         lvl = l
     else if(a < -90)
         lvl = 2
@@ -91,19 +94,43 @@ var makeGrad = () => {
 }
 
  window.onload = function() {
+
    var socketURL = 'ws://192.168.1.162:8080';
    var socketURL2 = 'ws://192.168.1.162:8081';
-   var player = new PCMPlayer({
-        encoding: '32bitInt',
-        channels: 2,
-        sampleRate: 48000,
-        flushingTime:150
-   });
-   let go = false
+   var player = null
+
+   var startPlay = () => {
+       player = new PCMPlayer({
+            encoding: '32bitInt',
+            channels: 2,
+            sampleRate: 48000,
+            flushingTime:150
+        });
+    }
+   let data = true
 
    document.getElementById("button").onclick = () => {
-       go = !go
-       console.log(go)
+       if(player) {
+            player.destroy()
+            player = null
+           console.log("Stoping play")
+           document.getElementById("button").classList.remove("on")
+       }
+       else {
+           startPlay()
+           console.log("Starting play")
+           document.getElementById("button").classList.add("on")
+       }
+   }
+
+   document.getElementById("datasee").onclick = () => {
+    if(data) {
+        document.getElementById("data").classList.remove("hidden")
+    }
+    else {
+        document.getElementById("data").classList.add("hidden")
+    }
+    data = !data
    }
 
    makeGrad()
@@ -112,7 +139,7 @@ var makeGrad = () => {
        ws.binaryType = 'arraybuffer';
        ws.addEventListener('message',function(event) {
             var data = new Uint8Array(event.data);
-            if(go)
+            if(player)
                player.feed(data);
        });
 
@@ -173,11 +200,6 @@ var makeGrad = () => {
             
        });
 
-    
-   document.getElementById("data").onclick = () => {
-       ws.send(JSON.stringify({type: 'clear'}))
-       console.log('sending clear')
-   }
    document.getElementById("vumeter").onclick = () => {
        ws.send(JSON.stringify({type: 'clear'}))
        console.log('sending clear')

@@ -31,9 +31,11 @@ let interval = 0.05,
   var client = null
 
 var getRtp = (params) => {
+    console.log(params)
     let madd = params.maddress
     let port = params.port
     let host = params.host
+    let offset = params.offset || 0
     client = dgram.createSocket({ type: "udp4", reuseAddr: true });
   
     client.on('listening', function () {
@@ -55,7 +57,7 @@ var getRtp = (params) => {
         let v = message.readInt8(0)
         let pt = message.readInt8(1)
         let seq = message.readUInt16BE(2)
-        let ts = message.readUInt32BE(4)
+        let ts = (message.readUInt32BE(4) - offset)%Math.pow(2,32)
         let ssrc = message.readUInt32BE(8)
   
         // inter packet time

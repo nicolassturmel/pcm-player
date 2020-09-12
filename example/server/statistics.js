@@ -23,7 +23,7 @@ module.exports = class statistics {
             this.first_round_ok--;
         }
         let r = {
-            mean: this.count > 0? this.acc/this.count : 0,
+            mean: (this.count > 0? this.acc/this.count : 0) || 0,
             min: this.min,
             max: this.max,
             min_global: this.global_min,
