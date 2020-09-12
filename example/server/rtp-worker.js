@@ -28,11 +28,13 @@ let interval = 0.05,
   let currentPos = 0
   let tic = 0 
 
+  var client = null
+
 var getRtp = (params) => {
     let madd = params.maddress
     let port = params.port
     let host = params.host
-    var client = dgram.createSocket({ type: "udp4", reuseAddr: true });
+    client = dgram.createSocket({ type: "udp4", reuseAddr: true });
   
     client.on('listening', function () {
         console.log('UDP Client listening on ' + madd + ":" + port);
@@ -131,6 +133,10 @@ parentPort.on("message",(t) => {
         case "start":
             getRtp(t.data)
             break
+        case "restart":
+            client.close()
+            console.log(t)
+            getRtp(t.data)
         case "clear":
             inter_packet_stats.clear()
             delay_stats.clear()

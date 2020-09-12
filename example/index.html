@@ -6,7 +6,7 @@
     <link rel="stylesheet" href="vumeter.css">
 </head>
 <body>
-<div id="container" style="margin: 0 auto;">
+<div id="container">
     <div id=vumeter>
         <div id=left class="bar  left white"></div>
         <div id=leftlvl class="bar audio left"></div>
@@ -26,6 +26,11 @@
             <div id=good-del-mean class="delay mean-stat"></div>
             <div id=good-del-max class="delay max-stat"></div>
             <div id=good-del-maxg class="delay maxg-stat"></div>
+        </div>
+    </div>
+    <div id=collection>
+        <div id="collection-in">
+
         </div>
     </div>
 </div>
@@ -92,7 +97,7 @@ var makeGrad = () => {
         encoding: '32bitInt',
         channels: 2,
         sampleRate: 48000,
-        flushingTime:300
+        flushingTime:150
    });
    let go = false
 
@@ -115,30 +120,65 @@ var makeGrad = () => {
        ws.addEventListener('message',function(event) {
             document.getElementById('data').innerHTML = event.data
             let gjj = JSON.parse(event.data)
-            bufferstats[bufferindex] = gjj
-            bufferindex = (bufferindex + 1)%bufferstats.length
-            let jj = bufferstats[(bufferindex + 2)%bufferstats.length]
-            if(!jj) return
-            setHeight(jj.rms[0],"left")
-            setHeight(jj.rms[1],"right")
-            setMax(jj.peak[0],"left")
-            setMax(jj.peak[1],"right")
-            setMaxg(jj.peakg[0],"left")
-            setMaxg(jj.peakg[1],"right")
-            document.getElementById("good-ip-mean").style.height = Math.min(100*jj.inter_packets.mean/20,100) + "%"
-            document.getElementById("good-ip-max").style.height = Math.min(100*jj.inter_packets.max/20,100) + "%"
-            document.getElementById("good-ip-maxg").style.height = Math.min(100*jj.inter_packets.max_global/20,100) + "%"
-            document.getElementById("good-del-mean").style.height = Math.min(100*jj.delay.mean/packet_size/20,100) + "%"
-            document.getElementById("good-del-max").style.height = Math.min(100*jj.delay.max/20/packet_size,100) + "%"
-            document.getElementById("good-del-maxg").style.height = Math.min(100*jj.delay.max_global/20/packet_size,100) + "%"
-            let g = document.getElementById("good")
-            if(jj.inter_packets.max_global > 20 || jj.delay.max_global > 20*packet_size) g.style["background-color"] = "red"
-            else if(jj.delay.mean/48/jj.inter_packets.mean < 2) g.style["background-color"] = "green"
-            else g.style["background-color"] = "orange"
+            switch(gjj.type) {
+                case "stats":
+                    bufferstats[bufferindex] = gjj.data
+                    bufferindex = (bufferindex + 1)%bufferstats.length
+                    let jj = bufferstats[(bufferindex + 2)%bufferstats.length]
+                    if(!jj) return
+                    setHeight(jj.rms[0],"left")
+                    setHeight(jj.rms[1],"right")
+                    setMax(jj.peak[0],"left")
+                    setMax(jj.peak[1],"right")
+                    setMaxg(jj.peakg[0],"left")
+                    setMaxg(jj.peakg[1],"right")
+                    document.getElementById("good-ip-mean").style.height = Math.min(100*jj.inter_packets.mean/20,100) + "%"
+                    document.getElementById("good-ip-max").style.height = Math.min(100*jj.inter_packets.max/20,100) + "%"
+                    document.getElementById("good-ip-maxg").style.height = Math.min(100*jj.inter_packets.max_global/20,100) + "%"
+                    document.getElementById("good-del-mean").style.height = Math.min(100*jj.delay.mean/packet_size/20,100) + "%"
+                    document.getElementById("good-del-max").style.height = Math.min(100*jj.delay.max/20/packet_size,100) + "%"
+                    document.getElementById("good-del-maxg").style.height = Math.min(100*jj.delay.max_global/20/packet_size,100) + "%"
+                    let g = document.getElementById("good")
+                    if(jj.inter_packets.max_global > 20 || jj.delay.max_global > 20*packet_size) g.style["background-color"] = "red"
+                    else if(jj.delay.mean/48/jj.inter_packets.mean < 2) g.style["background-color"] = "green"
+                    else g.style["background-color"] = "orange"
+                    break;
+                case "streams":
+                    if(gjj.action == "update")  {
+                        let cont = document.getElementById("collection-in")
+                        let name = gjj.data.name
+                        let elem = document.getElementById("session-" + name)
+                        if(!elem)
+                        {
+                            elem = document.createElement("div")
+                            elem.id = "session-" + name
+                            elem.className = "session"
+                            elem.innerHTML = name + "<br>" + gjj.data.connection.ip + ":" + gjj.data.media[0].port
+                            elem.onclick = () => {
+                                ws.send(JSON.stringify({type: 'session', data: name}))
+                                document.querySelectorAll("div.session").forEach(elem => {
+                                    if(elem.id == "session-" + name )
+                                        elem.classList.add("selected")
+                                    else
+                                        elem.classList.remove("selected")
+                                })
+                            }
+                            cont.appendChild(elem)
+                        }
+                    }
+                    break;
+                default:
+                    break;
+            }
+            
        });
 
     
    document.getElementById("data").onclick = () => {
+       ws.send(JSON.stringify({type: 'clear'}))
+       console.log('sending clear')
+   }
+   document.getElementById("vumeter").onclick = () => {
        ws.send(JSON.stringify({type: 'clear'}))
        console.log('sending clear')
    }

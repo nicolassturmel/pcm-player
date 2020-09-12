@@ -3,56 +3,44 @@ const fs = require('fs');
 var dgram = require('dgram'); 
 var stats = require('./statistics')
 const { Worker } = require('worker_threads')
+const sdpTransform = require('sdp-transform');
 
-const worker = new Worker("./rtp-worker.js")
-worker.on('online', () => { 
-  worker.postMessage({
-    type: "start",
-    data: {
-      maddress: "239.1.1.135",
-      host: "192.168.1.162",
-      port: 5008,
-      codec: "L24",
-      channels: 2,
-      buuferLength: 0.05,
+var RtpReceivers = {}
+
+var launchRtpReceiver = (sdp,host,id) =>
+{
+  console.log(sdp.connection)
+  var worker = new Worker("./rtp-worker.js")
+  worker.on('online', () => { 
+    worker.postMessage({
+      type: "start",
+      data: {
+        maddress: sdp.connection.ip.split("/")[0],
+        host: host,
+        port: sdp.media[0].port,
+        codec: "L24",
+        channels: 2,
+        buuferLength: 0.05,
+      }
+    })
+    console.log('One more worker') 
+  })
+  worker.on('message',(k) => {
+    switch(k.type) {
+      case "data":
+        sendData(k.data)
+        break
+      default:
+        break
     }
   })
-  console.log('Launching intensive CPU task') 
-})
-worker.on('message',(k) => {
-  switch(k.type) {
-    case "data":
-      sendData(k.data)
-      break
-    default:
-      break
-  }
-})
-var inter_packet_stats = new stats()
-var delay_stats = new stats()
-var rms = [new stats(), new stats()]
+  RtpReceivers[id] = worker
+}
 
-let interval = 0.05,
-    sampleRate = 48000,
-    bytePerSample = 4,
-    bytePerSampleStream = 3,
-    channels = 2,
-    wss,
+let wss,
     wss2;
 
-  let buffer = [
-    new Buffer.alloc(interval*sampleRate* bytePerSample * channels),
-    new Buffer.alloc(interval*sampleRate* bytePerSample * channels)
-  ]
-
-  let currentBuffer = 0
-  let currentPos = 0
-  let tic = 0
   openSocket();
-
-
-  let maxG = 0
-  let minG = Number.POSITIVE_INFINITY
 
 let timeOffset = 0n
 
@@ -87,7 +75,8 @@ function getPTP() {
       let s = BigInt(ts1*Math.pow(2,48) + ts2*Math.pow(2,32) + ts3*Math.pow(2,24) + ts4*Math.pow(2,16) + ts5*Math.pow(2,8) + ts6)*1000000000n + BigInt(ns1*Math.pow(2,24) + ns2*Math.pow(2,16) + ns3*Math.pow(2,8) + ns4)
       console.log(" - " + s)
       timeOffset =  s - time
-      worker.postMessage({type: "timeOffset", data: timeOffset})
+      Object.keys(RtpReceivers).forEach(k => RtpReceivers[k].postMessage({type: "timeOffset", data: timeOffset}))
+      
     }
   })
 
@@ -95,7 +84,66 @@ function getPTP() {
   client.bind(port);
 }
 
+let sdpCollections = []
 
+function getSAP() {
+  let madd = '239.255.255.255'
+  let port = 9875
+  let host = "192.168.1.162"
+  var client = dgram.createSocket({ type: "udp4", reuseAddr: true });
+
+  client.on('listening', function () {
+      console.log('UDP Client listening on ' + madd + ":" + port);
+      client.setBroadcast(true)
+      client.setMulticastTTL(128); 
+      client.addMembership(madd,host);
+  });
+
+  var removeSdp = (name) => {
+     let id = sdpCollections.findIndex((k) => {k.name == name;})
+     if(id >= 0) {
+        sendSDP(sdpCollections[id].sdp,"remove")
+       sdpCollections.splice(id,1)
+     }
+  }
+
+  client.on('message', function (message, remote) {
+    let sdp = sdpTransform.parse(message.toString().split("application/sdp")[1])
+    let timer = setTimeout( () => {
+      removeSdp(sdp.name)
+    } , 45000)
+    if(!sdpCollections.some(k => k.name == sdp.name)) {
+      sdpCollections.push({
+        sdp: sdp,
+        timer: timer,
+        name: sdp.name
+      })
+      sendSDP(sdp,"update")
+    }
+    else {
+      let item = sdpCollections.filter(k => k.name == sdp.name)[0]
+      item.timer.refresh()
+      item.sdp = sdp
+      sendSDP(sdp,"update")
+    }
+    
+  })
+
+
+  client.bind(port);
+}
+
+var sendSDP = (SDP,action) => {
+  wss2.clients.forEach(function each(client) {
+    if (client.readyState === WebSocket.OPEN) {
+        client.send(JSON.stringify({
+          type: "streams",
+          action: action,
+          data: SDP
+        }));
+    }
+  })
+}
 
 function openSocket() {
   wss = new WebSocket.Server({ port: 8080 });
@@ -114,16 +162,31 @@ function openSocket() {
           let msg = JSON.parse(m)
           console.log(m,msg)
           if(msg.type == "clear") { 
-            worker.postMessage({type: "clear"})
+            Object.keys(RtpReceivers).forEach(k => RtpReceivers[k].postMessage({type: "clear"}))
+          }
+          if(msg.type == "session") {
+            let sdpElem = sdpCollections.filter(e => e.name == msg.data)[0]
+            if(sdpElem) {
+              let params = {
+                maddress: sdpElem.sdp.connection.ip.split("/")[0],
+                host: "192.168.1.162",
+                port: sdpElem.sdp.media[0].port,
+                codec: "L24",
+                channels: 2,
+                buuferLength: 0.05,
+              }
+              RtpReceivers["thgssdfw"].postMessage({
+                type: "restart",
+                data: params
+              })
+            }
+            
           }
         })
   });
 }
 
 function sendData(struct) {
-    let payload;
-    //console.log(struct)
-    payload = buffer[currentBuffer]
     wss.clients.forEach(function each(client) {
       if (client.readyState === WebSocket.OPEN) {
           client.send(struct.buffer);
@@ -132,9 +195,38 @@ function sendData(struct) {
     struct.buffer = null
     wss2.clients.forEach(function each(client) {
       if (client.readyState === WebSocket.OPEN) {
-          client.send(JSON.stringify(struct));
+          client.send(JSON.stringify({
+            type: "stats",
+            data: struct
+          }));
       }
     });
 }
 
 getPTP()
+getSAP()
+
+let sdpstr ="v=0\n\
+o=- 2 0 IN IP4 192.168.1.135\n\
+s=ASIO (on OCT00317)_Horus_80858_AES 3-3\n\
+c=IN IP4 239.1.1.135/15\n\
+t=0 0\n\
+a=clock-domain:PTPv2 0\n\
+a=ts-refclk:ptp=IEEE1588-2008:00-1D-C1-FF-FE-13-05-90:0\n\
+a=mediaclk:direct=0\n\
+m=audio 5008 RTP/AVP 98\n\
+c=IN IP4 239.1.1.135/15\n\
+a=rtpmap:98 L24/48000/\n\
+a=source-filter: incl IN IP4 239.1.1.135 192.168.1.135\n\
+a=clock-domain:PTPv2 0\n\
+a=sync-time:0\n\
+a=framecount:48-768\n\
+a=palign:0\n\
+a=ptime:1\n\
+a=ts-refclk:ptp=IEEE1588-2008:00-1D-C1-FF-FE-13-05-90:0\n\
+a=mediaclk:direct=0\n\
+a=recvonly\n\
+a=ASIO-clock:4242\n\
+"
+
+launchRtpReceiver(sdpTransform.parse(sdpstr),"192.168.1.162","thgssdfw")
